@@ -1,13 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { Trash2, Star, Bell, History, Info, LogOut } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { useUserPrefs, useUpsertUserPrefs } from "@/api/userPrefs";
 import { useHospital } from "@/api/hospitals";
-import { useActiveCheckins } from "@/api/checkins";
 import { supabase } from "@/lib/supabase";
-import { format } from "date-fns";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -26,6 +27,17 @@ const Settings = () => {
   const handleToggle = async (key: keyof typeof prefs) => {
     if (!user || !prefs) return;
     await upsertPrefs.mutateAsync({ user_id: user.id, [key]: !prefs[key as keyof typeof prefs] });
+  };
+
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+
+  const handleFeedbackSubmit = () => {
+    const subject = encodeURIComponent('QueueWise Feedback');
+    const body = encodeURIComponent(feedbackText);
+    window.open(`mailto:jugalkakkat@gmail.com?subject=${subject}&body=${body}`);
+    setFeedbackText('');
+    setFeedbackOpen(false);
   };
 
   const handleSignOut = async () => {
@@ -126,9 +138,34 @@ const Settings = () => {
         <div className="text-sm text-muted-foreground space-y-2">
           <p>QueueWise · v0.1.0</p>
           <a className="text-primary hover:underline block" href="#">Privacy policy</a>
-          <a className="text-primary hover:underline block" href="#">Submit feedback</a>
+          <button
+            className="text-primary hover:underline block text-left"
+            onClick={() => setFeedbackOpen(true)}
+          >
+            Submit feedback
+          </button>
         </div>
       </section>
+
+      <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Submit feedback</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            placeholder="What's on your mind? Bug reports, suggestions, anything…"
+            className="min-h-32 resize-none"
+            value={feedbackText}
+            onChange={(e) => setFeedbackText(e.target.value)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFeedbackOpen(false)}>Cancel</Button>
+            <Button onClick={handleFeedbackSubmit} disabled={!feedbackText.trim()}>
+              Send feedback
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Actions */}
       <div className="grid grid-cols-2 gap-3">
