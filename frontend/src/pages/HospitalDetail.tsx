@@ -196,30 +196,34 @@ const HospitalDetail = () => {
 
         <div className="space-y-6">
           <div className="card-surface p-6">
-            <p className="font-semibold mb-4">All doctors · {activeDept?.name ?? ''}</p>
-            {deptDoctors.length === 0 ? (
+            <p className="font-semibold mb-4">All doctors</p>
+            {doctors.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">No doctor data available</p>
             ) : (
               <div className="space-y-3">
-                {deptDoctors.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => navigate(`/doctor/${d.id}`)}
-                    className="w-full flex items-center justify-between py-2 px-2 -mx-2 rounded-lg hover:bg-surface-muted"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-full bg-primary-soft text-primary flex items-center justify-center font-semibold text-xs">
-                        {d.name.split(' ').slice(1, 3).map((s) => s[0]).join('')}
+                {doctors.map((d) => {
+                  const deptName = departments.find((dep) => dep.id === d.department_id)?.name;
+                  return (
+                    <button
+                      key={d.id}
+                      onClick={() => navigate(`/doctor/${d.id}`)}
+                      className="w-full flex items-center justify-between py-2 px-2 -mx-2 rounded-lg hover:bg-surface-muted"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-primary-soft text-primary flex items-center justify-center font-semibold text-xs">
+                          {d.name.split(' ').slice(1, 3).map((s) => s[0]).join('')}
+                        </div>
+                        <div className="text-left">
+                          <p className="text-sm font-medium">{d.name}</p>
+                          {deptName && <p className="text-xs text-muted-foreground">{deptName}</p>}
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <p className="text-sm font-medium">{d.name}</p>
-                      </div>
-                    </div>
-                    <span className={`pill ${statusColor(d.status)} capitalize`}>
-                      {d.status.replace('_', ' ')}
-                    </span>
-                  </button>
-                ))}
+                      <span className={`pill ${statusColor(d.status)} capitalize`}>
+                        {d.status.replace('_', ' ')}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
