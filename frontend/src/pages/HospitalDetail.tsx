@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { MapPin, Phone, Users } from "lucide-react";
+import { MapPin, Phone, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Heatmap } from "@/components/Heatmap";
 import { useState, useEffect } from "react";
@@ -8,8 +8,12 @@ import { useDepartments } from "@/api/departments";
 import { useQueuePatterns } from "@/api/patterns";
 import { useDoctorsByHospital } from "@/api/doctors";
 import { useActiveCheckins } from "@/api/checkins";
-import { getHeatmapMatrix } from "@/lib/predictions";
+import { getHeatmapMatrix, formatWaitTime } from "@/lib/predictions";
 import { formatDistanceToNow } from "date-fns";
+import { DAYS, HOURS } from "@/lib/mockData";
+
+const HEATMAP_DAYS = [1, 2, 3, 4, 5, 6, 0];
+const HEATMAP_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 
 const HospitalDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -26,8 +30,18 @@ const HospitalDetail = () => {
   const { data: patterns = [] } = useQueuePatterns(activeDeptId);
   const { data: doctors = [] } = useDoctorsByHospital(id);
   const { data: checkins = [] } = useActiveCheckins(activeDeptId);
+  const [selectedCell, setSelectedCell] = useState<{ dayIdx: number; hourIdx: number } | null>(null);
 
   const heatmapData = activeDeptId ? getHeatmapMatrix(patterns, activeDeptId) : undefined;
+
+  const selectedWait = selectedCell && activeDeptId
+    ? patterns.find(
+        (p) =>
+          p.department_id === activeDeptId &&
+          p.day_of_week === HEATMAP_DAYS[selectedCell.dayIdx] &&
+          p.hour === HEATMAP_HOURS[selectedCell.hourIdx]
+      )?.avg_wait_minutes ?? null
+    : null;
   const activeDept = departments.find((d) => d.id === activeDeptId);
   const deptDoctors = doctors.filter((d) => d.department_id === activeDeptId);
 
@@ -75,7 +89,7 @@ const HospitalDetail = () => {
           {departments.map((d) => (
             <button
               key={d.id}
-              onClick={() => setActiveDeptId(d.id)}
+              onClick={() => { setActiveDeptId(d.id); setSelectedCell(null); }}
               className={`pill h-9 px-4 ${
                 activeDeptId === d.id
                   ? 'bg-ink text-ink-foreground'
@@ -96,7 +110,30 @@ const HospitalDetail = () => {
             </p>
             <p className="text-xs text-muted-foreground mb-4">Tap any hour for a precise prediction</p>
             {heatmapData ? (
-              <Heatmap data={heatmapData} />
+              <>
+                <Heatmap
+                  data={heatmapData}
+                  onCellClick={(dayIdx, hourIdx) => setSelectedCell({ dayIdx, hourIdx })}
+                />
+                {selectedCell && (
+                  <div className="mt-4 flex items-center justify-between rounded-xl bg-primary-soft px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-primary">
+                        {DAYS[selectedCell.dayIdx]} · {HOURS[selectedCell.hourIdx]}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Predicted wait:{' '}
+                        <span className="font-medium text-foreground">
+                          {formatWaitTime(selectedWait)}
+                        </span>
+                      </p>
+                    </div>
+                    <button onClick={() => setSelectedCell(null)} className="text-muted-foreground hover:text-foreground">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-8">
                 Not enough data yet for this department.
