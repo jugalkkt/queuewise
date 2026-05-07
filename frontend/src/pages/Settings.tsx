@@ -17,12 +17,23 @@ const Settings = () => {
   const { data: primaryHospital } = useHospital(prefs?.primary_hospital_id ?? undefined);
   const upsertPrefs = useUpsertUserPrefs();
 
-  const displayName = user?.user_metadata?.full_name ?? 'User';
+  const displayName = user?.user_metadata?.full_name ?? user?.email ?? 'User';
   const initial = displayName[0]?.toUpperCase() ?? 'U';
-  const loginMethod =
-    user?.app_metadata?.provider === 'google'
-      ? `Google · ${user.email ?? ''}`
-      : `Phone · ${user?.phone ?? ''}`;
+
+  const providers = user?.app_metadata?.providers as string[] | undefined;
+  const isGoogle =
+    user?.app_metadata?.provider === 'google' ||
+    providers?.includes('google') ||
+    user?.identities?.some((i: { provider: string }) => i.provider === 'google');
+  const isEmail =
+    user?.app_metadata?.provider === 'email' ||
+    providers?.includes('email');
+
+  const loginMethod = isGoogle
+    ? `Google · ${user?.email ?? ''}`
+    : isEmail
+    ? `Email · ${user?.email ?? ''}`
+    : `Phone · ${user?.phone ?? ''}`;
 
   const handleToggle = async (key: keyof typeof prefs) => {
     if (!user || !prefs) return;
