@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, MapPin, Clock, Sparkles, Users, RefreshCw, Plus, Calendar } from "lucide-react";
+import { ChevronDown, MapPin, Clock, Sparkles, Users, RefreshCw, Plus, Calendar, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Heatmap } from "@/components/Heatmap";
 import { useAuth } from "@/lib/auth";
@@ -14,6 +14,10 @@ import { getCurrentWait, getBestTimeToVisit, getHeatmapMatrix, formatWaitTime } 
 import { supabase } from "@/lib/supabase";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow, format } from "date-fns";
+import { DAYS, HOURS } from "@/lib/mockData";
+
+const HEATMAP_DAYS = [1, 2, 3, 4, 5, 6, 0];
+const HEATMAP_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -27,10 +31,21 @@ const Dashboard = () => {
   const { data: doctors = [] } = useDoctors(dept?.id);
   const { data: checkins = [], refetch } = useActiveCheckins(dept?.id);
 
+  const [selectedCell, setSelectedCell] = useState<{ dayIdx: number; hourIdx: number } | null>(null);
+
   const now = new Date();
   const currentWait = dept ? getCurrentWait(patterns, dept.id, now) : null;
   const bestTime = dept ? getBestTimeToVisit(patterns, dept.id, now) : null;
   const heatmapData = dept ? getHeatmapMatrix(patterns, dept.id) : undefined;
+
+  const selectedWait = selectedCell && dept
+    ? patterns.find(
+        (p) =>
+          p.department_id === dept.id &&
+          p.day_of_week === HEATMAP_DAYS[selectedCell.dayIdx] &&
+          p.hour === HEATMAP_HOURS[selectedCell.hourIdx]
+      )?.avg_wait_minutes ?? null
+    : null;
 
   // Realtime subscription for live check-in feed
   useEffect(() => {
@@ -172,7 +187,30 @@ const Dashboard = () => {
               <span className="text-xs text-muted-foreground">This week</span>
             </div>
             {heatmapData ? (
-              <Heatmap data={heatmapData} />
+              <>
+                <Heatmap
+                  data={heatmapData}
+                  onCellClick={(dayIdx, hourIdx) => setSelectedCell({ dayIdx, hourIdx })}
+                />
+                {selectedCell && (
+                  <div className="mt-4 flex items-center justify-between rounded-xl bg-primary-soft px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-primary">
+                        {DAYS[selectedCell.dayIdx]} · {HOURS[selectedCell.hourIdx]}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Predicted wait:{' '}
+                        <span className="font-medium text-foreground">
+                          {formatWaitTime(selectedWait)}
+                        </span>
+                      </p>
+                    </div>
+                    <button onClick={() => setSelectedCell(null)} className="text-muted-foreground hover:text-foreground">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-center py-10">
                 <p className="text-sm text-muted-foreground">Not enough data yet for this department.</p>
