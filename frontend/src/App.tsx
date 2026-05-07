@@ -10,6 +10,7 @@ import Landing from "./pages/Landing";
 import GuestResult from "./pages/GuestResult";
 import Login from "./pages/Login";
 import OTP from "./pages/OTP";
+import AuthCallback from "./pages/AuthCallback";
 import OnboardingHospital from "./pages/OnboardingHospital";
 import OnboardingDepartment from "./pages/OnboardingDepartment";
 import Dashboard from "./pages/Dashboard";
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/guest-result" element={<GuestResult />} />
             <Route path="/login" element={<Login />} />
             <Route path="/otp" element={<OTP />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/onboarding/hospital" element={<OnboardingHospital />} />
               <Route path="/onboarding/department" element={<OnboardingDepartment />} />

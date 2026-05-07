@@ -28,11 +28,15 @@ const Login = () => {
   const [emailSent, setEmailSent] = useState(false);
 
   const handleGoogle = async () => {
+    setLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/onboarding/hospital` },
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
-    if (error) toast.error('Google sign-in failed: ' + error.message);
+    if (error) {
+      toast.error('Google sign-in failed: ' + error.message);
+      setLoading(false);
+    }
   };
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -44,7 +48,7 @@ const Login = () => {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOtp({
       email: emailInput,
-      options: { emailRedirectTo: `${window.location.origin}/onboarding/hospital` },
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
     setLoading(false);
     if (error) {
@@ -125,6 +129,7 @@ const Login = () => {
             size="lg"
             className="w-full"
             onClick={handleGoogle}
+            disabled={loading}
           >
             <GoogleIcon /> Continue with Google
           </Button>
