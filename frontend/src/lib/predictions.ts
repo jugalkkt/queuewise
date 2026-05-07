@@ -63,3 +63,47 @@ export function formatWaitTime(minutes: number | null): string {
   if (minutes < 60) return `${minutes}m`
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
+
+export function isWithinWorkingHours(date: Date): boolean {
+  const h = date.getHours()
+  return h >= 8 && h <= 19
+}
+
+// Returns human-readable label for when OPD next opens, plus the expected wait at opening.
+export function getNextOpenInfo(
+  patterns: QueuePattern[],
+  departmentId: string,
+  now: Date
+): { label: string; sublabel: string; waitMinutes: number | null } {
+  const hour = now.getHours()
+  const DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+  // Opens later today
+  if (hour < 8) {
+    const wait = patterns.find(
+      (p) => p.department_id === departmentId && p.day_of_week === now.getDay() && p.hour === 8
+    )?.avg_wait_minutes ?? null
+    return { label: 'Opens today at 8:00 AM', sublabel: 'OPD starts at 8 AM', waitMinutes: wait }
+  }
+
+  // After closing — find next day with data
+  const base = new Date(now)
+  for (let offset = 1; offset <= 7; offset++) {
+    base.setDate(now.getDate() + offset)
+    const nextDay = base.getDay()
+    const wait = patterns.find(
+      (p) => p.department_id === departmentId && p.day_of_week === nextDay && p.hour === 8
+    )?.avg_wait_minutes ?? null
+
+    const isToday = offset === 0
+    const isTomorrow = offset === 1
+    const dayLabel = isToday ? 'today' : isTomorrow ? 'tomorrow' : DAY[nextDay]
+    return {
+      label: `Opens ${dayLabel} at 8:00 AM`,
+      sublabel: `Next OPD session · ${DAY[nextDay]}`,
+      waitMinutes: wait,
+    }
+  }
+
+  return { label: 'OPD closed', sublabel: 'Check back during working hours', waitMinutes: null }
+}

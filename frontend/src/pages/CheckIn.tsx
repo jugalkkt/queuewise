@@ -9,7 +9,7 @@ import { useDepartment } from "@/api/departments";
 import { useQueuePatterns } from "@/api/patterns";
 import { useDoctors } from "@/api/doctors";
 import { useCreateCheckin } from "@/api/checkins";
-import { getCurrentWait, formatWaitTime } from "@/lib/predictions";
+import { getCurrentWait, formatWaitTime, isWithinWorkingHours, getNextOpenInfo } from "@/lib/predictions";
 import { toast } from "sonner";
 
 const queueOptions = [
@@ -35,7 +35,12 @@ const CheckIn = () => {
   const { data: doctors = [] } = useDoctors(dept?.id);
   const createCheckin = useCreateCheckin();
 
-  const estimatedWait = dept ? getCurrentWait(patterns, dept.id, new Date()) : null;
+  const now = new Date();
+  const estimatedWait = dept ? getCurrentWait(patterns, dept.id, now) : null;
+  const withinHours = isWithinWorkingHours(now);
+  const nextOpen = (!withinHours || estimatedWait === null) && dept
+    ? getNextOpenInfo(patterns, dept.id, now)
+    : null;
 
   const handleSubmit = async () => {
     if (!selected || !user || !dept) return;
@@ -78,13 +83,32 @@ const CheckIn = () => {
         <ChevronDown className="h-4 w-4 text-muted-foreground" />
       </button>
 
-      <div className="card-surface p-6 bg-gradient-hero text-primary-foreground">
-        <p className="text-xs opacity-80">Your estimated wait from now</p>
-        <p className="font-display font-bold text-5xl mt-2">
-          {estimatedWait !== null ? `~ ${formatWaitTime(estimatedWait)}` : 'No data yet'}
-        </p>
-        <p className="text-xs opacity-80 mt-2">Based on historical patterns for this department</p>
-      </div>
+      {estimatedWait !== null ? (
+        <div className="card-surface p-6 bg-gradient-hero text-primary-foreground">
+          <p className="text-xs opacity-80">Your estimated wait from now</p>
+          <p className="font-display font-bold text-5xl mt-2">~ {formatWaitTime(estimatedWait)}</p>
+          <p className="text-xs opacity-80 mt-2">Based on historical patterns for this department</p>
+        </div>
+      ) : nextOpen ? (
+        <div className="card-surface p-6 bg-gradient-hero text-primary-foreground">
+          <p className="text-xs opacity-80 flex items-center gap-1">
+            {withinHours ? 'Low activity right now' : 'OPD is currently closed'}
+          </p>
+          <p className="font-display font-bold text-3xl mt-2">{nextOpen.label}</p>
+          {nextOpen.waitMinutes !== null && (
+            <p className="text-sm opacity-90 mt-2 font-medium">
+              Expected wait at opening: ~ {formatWaitTime(nextOpen.waitMinutes)}
+            </p>
+          )}
+          <p className="text-xs opacity-70 mt-1">{nextOpen.sublabel}</p>
+        </div>
+      ) : (
+        <div className="card-surface p-6 bg-gradient-hero text-primary-foreground">
+          <p className="text-xs opacity-80">Your estimated wait from now</p>
+          <p className="font-display font-bold text-3xl mt-2">Select a department</p>
+          <p className="text-xs opacity-70 mt-2">Choose your department above to see wait times</p>
+        </div>
+      )}
 
       <div className="card-surface p-6">
         <p className="font-semibold mb-1">How does the queue feel right now?</p>

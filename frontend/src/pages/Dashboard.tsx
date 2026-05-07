@@ -10,7 +10,7 @@ import { useDepartment } from "@/api/departments";
 import { useQueuePatterns } from "@/api/patterns";
 import { useDoctors } from "@/api/doctors";
 import { useActiveCheckins } from "@/api/checkins";
-import { getCurrentWait, getBestTimeToVisit, getHeatmapMatrix, formatWaitTime } from "@/lib/predictions";
+import { getCurrentWait, getBestTimeToVisit, getHeatmapMatrix, formatWaitTime, isWithinWorkingHours, getNextOpenInfo } from "@/lib/predictions";
 import { supabase } from "@/lib/supabase";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow, format } from "date-fns";
@@ -36,6 +36,10 @@ const Dashboard = () => {
   const now = new Date();
   const currentWait = dept ? getCurrentWait(patterns, dept.id, now) : null;
   const bestTime = dept ? getBestTimeToVisit(patterns, dept.id, now) : null;
+  const withinHours = isWithinWorkingHours(now);
+  const nextOpen = dept && (currentWait === null || !withinHours)
+    ? getNextOpenInfo(patterns, dept.id, now)
+    : null;
   const heatmapData = dept ? getHeatmapMatrix(patterns, dept.id) : undefined;
 
   const selectedWait = selectedCell && dept
@@ -135,17 +139,40 @@ const Dashboard = () => {
             {/* Wait now card */}
             <div className="card-surface p-6 bg-gradient-hero text-primary-foreground relative overflow-hidden">
               <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10" />
-              <p className="text-xs opacity-80 flex items-center gap-1">
-                <Clock className="h-3 w-3" /> Wait time now
-              </p>
-              <p className="font-display font-bold text-5xl mt-2">
-                {formatWaitTime(currentWait)}
-              </p>
-              <p className="text-xs opacity-90 mt-3">
-                {checkins.length > 0
-                  ? `${checkins.length} active ${checkins.length === 1 ? 'report' : 'reports'} · Updated just now`
-                  : 'Based on historical patterns'}
-              </p>
+              {currentWait !== null ? (
+                <>
+                  <p className="text-xs opacity-80 flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> Wait time now
+                  </p>
+                  <p className="font-display font-bold text-5xl mt-2">~ {formatWaitTime(currentWait)}</p>
+                  <p className="text-xs opacity-90 mt-3">
+                    {checkins.length > 0
+                      ? `${checkins.length} active ${checkins.length === 1 ? 'report' : 'reports'} · Updated just now`
+                      : 'Based on historical patterns'}
+                  </p>
+                </>
+              ) : nextOpen ? (
+                <>
+                  <p className="text-xs opacity-80 flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {withinHours ? 'Low activity right now' : 'OPD closed'}
+                  </p>
+                  <p className="font-display font-bold text-2xl mt-2">{nextOpen.label}</p>
+                  {nextOpen.waitMinutes !== null && (
+                    <p className="text-sm opacity-90 mt-2 font-medium">
+                      Expected wait at opening: ~ {formatWaitTime(nextOpen.waitMinutes)}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs opacity-80 flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> Wait time now
+                  </p>
+                  <p className="font-display font-bold text-3xl mt-2">Select dept</p>
+                  <p className="text-xs opacity-70 mt-2">Choose a department to see wait times</p>
+                </>
+              )}
             </div>
 
             {/* Best time card */}
