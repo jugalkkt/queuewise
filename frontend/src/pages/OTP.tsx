@@ -39,7 +39,7 @@ const OTP = () => {
       setCode('');
       return;
     }
-    navigate('/onboarding/hospital');
+    navigate('/auth/callback');
   };
 
   const handleResend = async () => {

@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Phone, Mail } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ArrowRight, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 
 const GoogleIcon = () => (
@@ -16,13 +15,7 @@ const GoogleIcon = () => (
   </svg>
 );
 
-type Mode = 'phone' | 'email';
-
 const Login = () => {
-  const navigate = useNavigate();
-  const { setPhone } = useAuth();
-  const [mode, setMode] = useState<Mode>('email');
-  const [phoneInput, setPhoneInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
@@ -56,25 +49,6 @@ const Login = () => {
       return;
     }
     setEmailSent(true);
-  };
-
-  const handlePhoneSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const digits = phoneInput.replace(/\s/g, '');
-    if (!digits.match(/^[0-9]{10}$/)) {
-      toast.error('Enter a valid 10-digit mobile number');
-      return;
-    }
-    setLoading(true);
-    const fullPhone = `+91${digits}`;
-    const { error } = await supabase.auth.signInWithOtp({ phone: fullPhone });
-    setLoading(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    setPhone(fullPhone);
-    navigate('/otp');
   };
 
   if (emailSent) {
@@ -140,59 +114,23 @@ const Login = () => {
             <div className="h-px flex-1 bg-border" />
           </div>
 
-          {/* Mode switcher */}
-          <div className="flex rounded-xl bg-surface-muted p-1 gap-1">
-            <button
-              onClick={() => setMode('email')}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${mode === 'email' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              Email
-            </button>
-            <button
-              onClick={() => setMode('phone')}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${mode === 'phone' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              Phone (OTP)
-            </button>
-          </div>
-
-          {mode === 'email' ? (
-            <form onSubmit={handleEmailSubmit} className="space-y-3">
-              <label className="text-xs font-medium text-muted-foreground">Email address</label>
-              <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 h-14">
-                <Mail className="h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="email"
-                  inputMode="email"
-                  placeholder="you@example.com"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  className="border-0 focus-visible:ring-0 bg-transparent text-base"
-                />
-              </div>
-              <Button type="submit" size="lg" variant="ink" className="w-full" disabled={loading}>
-                {loading ? 'Sending…' : 'Send magic link'} <ArrowRight className="h-4 w-4" />
-              </Button>
-            </form>
-          ) : (
-            <form onSubmit={handlePhoneSubmit} className="space-y-3">
-              <label className="text-xs font-medium text-muted-foreground">Phone number</label>
-              <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 h-14">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">+91</span>
-                <Input
-                  inputMode="numeric"
-                  placeholder="98765 43210"
-                  value={phoneInput}
-                  onChange={(e) => setPhoneInput(e.target.value)}
-                  className="border-0 focus-visible:ring-0 bg-transparent text-base"
-                />
-              </div>
-              <Button type="submit" size="lg" variant="ink" className="w-full" disabled={loading}>
-                {loading ? 'Sending…' : 'Send OTP'} <ArrowRight className="h-4 w-4" />
-              </Button>
-            </form>
-          )}
+          <form onSubmit={handleEmailSubmit} className="space-y-3">
+            <label className="text-xs font-medium text-muted-foreground">Email address</label>
+            <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 h-14">
+              <Mail className="h-4 w-4 text-muted-foreground" />
+              <Input
+                type="email"
+                inputMode="email"
+                placeholder="you@example.com"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="border-0 focus-visible:ring-0 bg-transparent text-base"
+              />
+            </div>
+            <Button type="submit" size="lg" variant="ink" className="w-full" disabled={loading}>
+              {loading ? 'Sending…' : 'Send magic link'} <ArrowRight className="h-4 w-4" />
+            </Button>
+          </form>
 
           <p className="text-[11px] text-muted-foreground text-center pt-2">
             By continuing, you agree to our <a className="underline" href="#">Terms</a> and <a className="underline" href="#">Privacy Policy</a>.
