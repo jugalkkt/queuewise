@@ -8,8 +8,9 @@ import { useHospital } from "@/api/hospitals";
 import { useDepartment } from "@/api/departments";
 import { useQueuePatterns } from "@/api/patterns";
 import { useDoctors } from "@/api/doctors";
-import { useCreateCheckin } from "@/api/checkins";
-import { getCurrentWait, formatWaitTime, isWithinWorkingHours, getNextOpenInfo } from "@/lib/predictions";
+import { useActiveCheckins, useCreateCheckin } from "@/api/checkins";
+import { getCurrentWait, formatWaitTime, isWithinWorkingHours, getNextOpenInfo, blendWithLiveCheckins } from "@/lib/predictions";
+import { rememberActiveCheckin } from "@/lib/activeVisit";
 import { toast } from "sonner";
 
 const queueOptions = [
@@ -33,10 +34,12 @@ const CheckIn = () => {
   const { data: dept } = useDepartment(prefs?.primary_department_id ?? undefined);
   const { data: patterns = [] } = useQueuePatterns(dept?.id);
   const { data: doctors = [] } = useDoctors(dept?.id);
+  const { data: liveCheckins = [] } = useActiveCheckins(dept?.id);
   const createCheckin = useCreateCheckin();
 
   const now = new Date();
-  const estimatedWait = dept ? getCurrentWait(patterns, dept.id, now) : null;
+  const historicalWait = dept ? getCurrentWait(patterns, dept.id, now) : null;
+  const estimatedWait = dept ? blendWithLiveCheckins(historicalWait, liveCheckins, now) : null;
   const withinHours = isWithinWorkingHours(now);
   const nextOpen = (!withinHours || estimatedWait === null) && dept
     ? getNextOpenInfo(patterns, dept.id, now)
@@ -52,10 +55,15 @@ const CheckIn = () => {
         user_id: user.id,
         doctor_id: selectedDoctorId ?? undefined,
       });
-      sessionStorage.setItem('active_checkin_id', checkin.id);
-      sessionStorage.setItem('active_dept_id', dept.id);
+      rememberActiveCheckin(checkin.id, dept.id);
       navigate('/visit');
-    } catch {
+    } catch (err) {
+      // A unique-violation means an earlier visit was never ended.
+      if ((err as { code?: string })?.code === '23505') {
+        toast.error('You already have a visit in progress. Finish it before checking in again.');
+        navigate('/visit');
+        return;
+      }
       toast.error('Check-in failed. Please try again.');
     } finally {
       setSubmitting(false);
@@ -87,7 +95,11 @@ const CheckIn = () => {
         <div className="card-surface p-6 bg-gradient-hero text-primary-foreground">
           <p className="text-xs opacity-80">Your estimated wait from now</p>
           <p className="font-display font-bold text-5xl mt-2">~ {formatWaitTime(estimatedWait)}</p>
-          <p className="text-xs opacity-80 mt-2">Based on historical patterns for this department</p>
+          <p className="text-xs opacity-80 mt-2">
+            {liveCheckins.length > 0
+              ? `Historical patterns blended with ${liveCheckins.length} live ${liveCheckins.length === 1 ? 'report' : 'reports'}`
+              : 'Based on historical patterns for this department'}
+          </p>
         </div>
       ) : nextOpen ? (
         <div className="card-surface p-6 bg-gradient-hero text-primary-foreground">

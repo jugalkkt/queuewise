@@ -9,6 +9,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // The app serves Kerala hospitals and buckets predictions in IST. Pin the
+    // runner's zone so date assertions don't depend on the developer's machine.
+    env: { TZ: "Asia/Kolkata" },
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },

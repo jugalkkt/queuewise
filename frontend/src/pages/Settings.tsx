@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth";
 import { useUserPrefs, useUpsertUserPrefs } from "@/api/userPrefs";
 import { useHospital } from "@/api/hospitals";
 import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -42,6 +43,8 @@ const Settings = () => {
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleFeedbackSubmit = () => {
     const subject = encodeURIComponent('QueueWise Feedback');
@@ -54,6 +57,24 @@ const Settings = () => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate('/');
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      // Deleting an auth user requires the service-role key, which must never
+      // reach the browser — so this runs in an edge function.
+      const { error } = await supabase.functions.invoke('delete-account');
+      if (error) throw error;
+      await supabase.auth.signOut();
+      toast.success('Your account and data have been deleted.');
+      navigate('/');
+    } catch {
+      toast.error('Could not delete your account. Please try again or contact support.');
+    } finally {
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
   };
 
   const notifs = prefs
@@ -183,10 +204,41 @@ const Settings = () => {
         <Button variant="outline" size="lg" onClick={handleSignOut}>
           <LogOut className="h-4 w-4" /> Log out
         </Button>
-        <Button variant="ghost" size="lg" className="text-destructive hover:bg-destructive/10" onClick={handleSignOut}>
+        <Button
+          variant="ghost"
+          size="lg"
+          className="text-destructive hover:bg-destructive/10"
+          onClick={() => setDeleteOpen(true)}
+        >
           <Trash2 className="h-4 w-4" /> Delete account
         </Button>
       </div>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This permanently removes your account, saved hospitals and notification preferences.
+            Your past queue reports stay in the system but are no longer linked to you. This cannot
+            be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="ghost"
+              className="text-destructive hover:bg-destructive/10"
+              onClick={handleDeleteAccount}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting…' : 'Delete permanently'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

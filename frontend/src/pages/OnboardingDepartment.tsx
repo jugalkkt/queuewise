@@ -4,25 +4,31 @@ import { ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDepartments } from "@/api/departments";
 import { useAuth } from "@/lib/auth";
-import { useUpsertUserPrefs } from "@/api/userPrefs";
+import { useUpsertUserPrefs, useUserPrefs } from "@/api/userPrefs";
 import { toast } from "sonner";
 
 const OnboardingDepartment = () => {
   const navigate = useNavigate();
   const { state } = useLocation();
-  const hospitalId: string | undefined = state?.hospitalId;
   const { user } = useAuth();
   const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const { data: departments = [], isLoading } = useDepartments(hospitalId);
+  // Router state is lost on refresh or direct navigation, which used to leave
+  // this page permanently empty with no explanation. Fall back to the hospital
+  // already saved in the user's preferences.
+  const { data: prefs, isLoading: prefsLoading } = useUserPrefs(user?.id);
+  const hospitalId: string | undefined = state?.hospitalId ?? prefs?.primary_hospital_id ?? undefined;
+
+  const { data: departments = [], isLoading: deptsLoading } = useDepartments(hospitalId);
+  const isLoading = prefsLoading || (!!hospitalId && deptsLoading);
   const upsertPrefs = useUpsertUserPrefs();
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const handleDone = async () => {
-    if (!user) return;
+    if (!user || selected.length === 0) return;
     setSaving(true);
     try {
       await upsertPrefs.mutateAsync({
@@ -72,6 +78,24 @@ const OnboardingDepartment = () => {
               <div key={i} className="h-16 bg-surface-muted rounded-2xl animate-pulse" />
             ))}
           </div>
+        ) : !hospitalId ? (
+          <div className="card-surface p-6 text-center space-y-3">
+            <p className="text-sm text-muted-foreground">
+              We don't know which hospital you picked. Choose one to continue.
+            </p>
+            <Button variant="soft" onClick={() => navigate('/onboarding/hospital')}>
+              Back to hospital selection
+            </Button>
+          </div>
+        ) : departments.length === 0 ? (
+          <div className="card-surface p-6 text-center space-y-3">
+            <p className="text-sm text-muted-foreground">
+              No departments are listed for this hospital yet.
+            </p>
+            <Button variant="soft" onClick={() => navigate('/onboarding/hospital')}>
+              Pick a different hospital
+            </Button>
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             {departments.map((d) => {
@@ -101,10 +125,15 @@ const OnboardingDepartment = () => {
             size="lg"
             variant="ink"
             className="w-full"
-            disabled={saving}
+            disabled={saving || selected.length === 0}
             onClick={handleDone}
           >
-            {saving ? "Saving…" : "Done — take me to my dashboard"} <ArrowRight className="h-4 w-4" />
+            {saving
+              ? "Saving…"
+              : selected.length === 0
+              ? "Select at least one department"
+              : "Done — take me to my dashboard"}{" "}
+            <ArrowRight className="h-4 w-4" />
           </Button>
           <button
             className="w-full text-center text-sm text-muted-foreground hover:text-foreground"

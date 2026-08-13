@@ -16,9 +16,14 @@ export interface Department {
 export interface QueuePattern {
   id: string
   department_id: string
-  day_of_week: number  // 0=Sun .. 6=Sat
+  day_of_week: number  // 0=Sun .. 6=Sat (Asia/Kolkata)
   hour: number         // 8..19
   avg_wait_minutes: number
+  /** Immutable seeded baseline that observed waits are blended against. */
+  seed_wait_minutes: number
+  /** How many real visit_feedback observations back this bucket. */
+  sample_count: number
+  updated_at: string
 }
 
 export interface Doctor {
@@ -44,13 +49,29 @@ export interface UserPreferences {
   onboarding_completed: boolean
 }
 
+/**
+ * A check-in as exposed by the `public_checkins` view — deliberately without
+ * user_id, so the anonymous feed cannot leak who reported what.
+ */
 export interface Checkin {
   id: string
-  user_id: string | null
   department_id: string
   doctor_id: string | null
   queue_condition: 'short' | 'medium' | 'long'
   ended_at: string | null
+  created_at: string
+}
+
+/** The caller's own check-in, read from the base table under RLS. */
+export interface OwnCheckin extends Checkin {
+  user_id: string
+}
+
+export interface DoctorStatusReport {
+  id: string
+  doctor_id: string
+  user_id: string
+  reported_status: 'on_duty' | 'on_leave'
   created_at: string
 }
 

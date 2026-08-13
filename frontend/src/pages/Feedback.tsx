@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useAuth } from "@/lib/auth";
 import { useCreateFeedback } from "@/api/feedback";
+import { readActiveCheckin, clearActiveCheckin } from "@/lib/activeVisit";
 import { toast } from "sonner";
 
 const Feedback = () => {
@@ -12,12 +13,21 @@ const Feedback = () => {
   const { user } = useAuth();
   const createFeedback = useCreateFeedback();
 
-  const [wait, setWait] = useState([75]);
-  const [doctorAvailable, setDoctorAvailable] = useState<boolean | null>(true);
-  const [mood, setMood] = useState<'good' | 'neutral' | 'poor' | null>('good');
+  const { checkinId: storedCheckinId, waitedMinutes } = readActiveCheckin();
+  const checkinId = storedCheckinId ?? '';
+
+  // Seed the slider from the wait we actually measured. Feedback now feeds the
+  // prediction model, so an untouched arbitrary default would be fabricated data.
+  const measuredWait =
+    waitedMinutes !== null ? Math.min(240, Math.max(15, Math.round(waitedMinutes / 15) * 15)) : null;
+
+  const [wait, setWait] = useState([measuredWait ?? 60]);
+  const [waitTouched, setWaitTouched] = useState(measuredWait !== null);
+  const [doctorAvailable, setDoctorAvailable] = useState<boolean | null>(null);
+  const [mood, setMood] = useState<'good' | 'neutral' | 'poor' | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const checkinId = sessionStorage.getItem('active_checkin_id') ?? '';
+  const canSubmit = waitTouched && doctorAvailable !== null && mood !== null;
 
   const formatWait = (m: number) => {
     if (m >= 240) return '4+ hours';
@@ -27,10 +37,16 @@ const Feedback = () => {
   };
 
   const handleSubmit = async () => {
-    if (!user || !checkinId || doctorAvailable === null || !mood) {
+    if (!user || !canSubmit || doctorAvailable === null || !mood) return;
+
+    // Without a check-in to attach to, the report cannot be tied to a time slot
+    // and so cannot improve any prediction. Say so instead of dropping it silently.
+    if (!checkinId) {
+      toast.error("We couldn't find your visit, so this feedback can't be saved.");
       navigate('/dashboard');
       return;
     }
+
     setSubmitting(true);
     try {
       await createFeedback.mutateAsync({
@@ -40,20 +56,25 @@ const Feedback = () => {
         doctor_available: doctorAvailable,
         experience_rating: mood,
       });
-      sessionStorage.removeItem('active_checkin_id');
-      sessionStorage.removeItem('active_dept_id');
-      toast.success('Thank you! Your feedback helps other patients.');
-    } catch {
-      toast.error('Could not save feedback, but your visit has been recorded.');
+      clearActiveCheckin();
+      toast.success('Thank you! Your report just improved this hour’s prediction.');
+      navigate('/dashboard');
+    } catch (err) {
+      // One feedback per visit — a duplicate means it already went through.
+      if ((err as { code?: string })?.code === '23505') {
+        clearActiveCheckin();
+        toast.info('You have already submitted feedback for this visit.');
+        navigate('/dashboard');
+        return;
+      }
+      toast.error('Could not save feedback. Please try again.');
     } finally {
       setSubmitting(false);
-      navigate('/dashboard');
     }
   };
 
   const handleSkip = () => {
-    sessionStorage.removeItem('active_checkin_id');
-    sessionStorage.removeItem('active_dept_id');
+    clearActiveCheckin();
     navigate('/dashboard');
   };
 
@@ -72,9 +93,22 @@ const Feedback = () => {
       <div className="card-surface p-6 space-y-4">
         <div className="flex items-center justify-between">
           <p className="font-semibold">How long did you actually wait?</p>
-          <p className="font-display font-bold text-2xl text-primary">{formatWait(wait[0])}</p>
+          <p className={`font-display font-bold text-2xl ${waitTouched ? 'text-primary' : 'text-muted-foreground'}`}>
+            {waitTouched ? formatWait(wait[0]) : '—'}
+          </p>
         </div>
-        <Slider value={wait} onValueChange={setWait} min={15} max={240} step={15} />
+        <Slider
+          value={wait}
+          onValueChange={(v) => { setWait(v); setWaitTouched(true); }}
+          min={15}
+          max={240}
+          step={15}
+        />
+        {measuredWait !== null && (
+          <p className="text-xs text-muted-foreground">
+            We measured about {formatWait(measuredWait)} — adjust if that's not right.
+          </p>
+        )}
         <div className="flex justify-between text-xs text-muted-foreground">
           <span>&lt; 30m</span><span>4+ hr</span>
         </div>
@@ -136,10 +170,11 @@ const Feedback = () => {
           size="lg"
           variant="ink"
           className="w-full"
-          disabled={submitting}
+          disabled={submitting || !canSubmit}
           onClick={handleSubmit}
         >
-          {submitting ? 'Saving…' : 'Submit feedback'} <ArrowRight className="h-4 w-4" />
+          {submitting ? 'Saving…' : canSubmit ? 'Submit feedback' : 'Answer all three to submit'}{' '}
+          <ArrowRight className="h-4 w-4" />
         </Button>
         <button
           className="w-full text-center text-sm text-muted-foreground hover:text-foreground"

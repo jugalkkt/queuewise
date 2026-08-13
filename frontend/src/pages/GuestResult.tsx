@@ -19,7 +19,7 @@ const GuestResult = () => {
   const dept = departments.find((d) => d.name === 'General OPD') ?? departments[0] ?? null;
 
   const { data: patterns = [] } = useQueuePatterns(dept?.id);
-  const heatmapData = dept ? getHeatmapMatrix(patterns, dept.id) : undefined;
+  const heatmapData = dept ? getHeatmapMatrix(patterns, dept.id) : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -71,10 +71,18 @@ const GuestResult = () => {
 
         <div className="card-surface p-6">
           <p className="font-semibold mb-4">This week's busy hours</p>
-          <Heatmap blurred data={heatmapData} />
-          <p className="text-xs text-muted-foreground mt-3 text-center">
-            Hour-by-hour breakdown unlocks after sign-up.
-          </p>
+          {heatmapData && patterns.length > 0 ? (
+            <>
+              <Heatmap blurred data={heatmapData} />
+              <p className="text-xs text-muted-foreground mt-3 text-center">
+                Hour-by-hour breakdown unlocks after sign-up.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No pattern data yet for this department.
+            </p>
+          )}
         </div>
 
         <div className="text-center pt-4">

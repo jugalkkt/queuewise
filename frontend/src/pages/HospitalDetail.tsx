@@ -109,7 +109,7 @@ const HospitalDetail = () => {
               Full week heatmap · {activeDept?.name ?? ''}
             </p>
             <p className="text-xs text-muted-foreground mb-4">Tap any hour for a precise prediction</p>
-            {heatmapData ? (
+            {heatmapData && patterns.length > 0 ? (
               <>
                 <Heatmap
                   data={heatmapData}

@@ -2,55 +2,76 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, Activity, ArrowRight, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useActiveCheckins, useEndCheckin, useUpdateCheckinCondition } from "@/api/checkins";
-import { supabase } from "@/lib/supabase";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  useActiveCheckins,
+  useEndedCheckins,
+  useEndCheckin,
+  useOwnActiveCheckin,
+  useUpdateCheckinCondition,
+} from "@/api/checkins";
+import { useQueuePatterns } from "@/api/patterns";
+import { useAuth } from "@/lib/auth";
+import { getCurrentWait, blendWithLiveCheckins, formatWaitTime } from "@/lib/predictions";
+import { readActiveCheckin, rememberActiveCheckin, rememberWaitedMinutes } from "@/lib/activeVisit";
 import { differenceInMinutes, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 const ActiveVisit = () => {
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const checkinId = sessionStorage.getItem('active_checkin_id') ?? '';
-  const deptId = sessionStorage.getItem('active_dept_id') ?? '';
+  const { user } = useAuth();
+
+  // Fast path from local storage, authoritative path from the database. The
+  // database lookup means a refresh (or a different tab) no longer loses the visit.
+  const stored = readActiveCheckin();
+  const { data: ownCheckin, isLoading: ownLoading } = useOwnActiveCheckin(user?.id);
+
+  const checkinId = ownCheckin?.id ?? stored.checkinId ?? '';
+  const deptId = ownCheckin?.department_id ?? stored.departmentId ?? '';
+
+  // Keep local storage in step with whatever the server says is open.
+  useEffect(() => {
+    if (ownCheckin) rememberActiveCheckin(ownCheckin.id, ownCheckin.department_id);
+  }, [ownCheckin]);
 
   const { data: checkins = [] } = useActiveCheckins(deptId || undefined);
+  const { data: endedCheckins = [] } = useEndedCheckins(deptId || undefined);
+  const { data: patterns = [] } = useQueuePatterns(deptId || undefined);
   const endCheckin = useEndCheckin();
   const updateCondition = useUpdateCheckinCondition();
 
-  // Simulated progress (for UX — increments as time passes)
-  const myCheckin = checkins.find((c) => c.id === checkinId);
-  const checkinTime = myCheckin ? new Date(myCheckin.created_at) : new Date();
-  const minutesWaited = differenceInMinutes(new Date(), checkinTime);
+  // The department feed refreshes on the 30s poll in useActiveCheckins.
+  // Realtime postgres_changes is not used here: the anonymised-feed RLS means a
+  // socket subscription would only ever deliver this user their own rows.
 
-  // Remaining estimate: use 60 min as baseline if no pattern data available
-  const [remaining, setRemaining] = useState(Math.max(0, 60 - minutesWaited));
-  const progress = Math.min(100, (minutesWaited / Math.max(minutesWaited + remaining, 1)) * 100);
-
+  // Re-render on a timer so elapsed time stays accurate. Elapsed is always
+  // derived from created_at rather than seeded once into state, so it cannot
+  // drift from the wall clock or reset when the component remounts.
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const i = setInterval(() => {
-      setRemaining((r) => Math.max(0, r - 1));
-    }, 60_000);
+    const i = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(i);
   }, []);
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!deptId) return;
-    const channel = supabase
-      .channel(`active-visit-${deptId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'checkins', filter: `department_id=eq.${deptId}` },
-        () => qc.invalidateQueries({ queryKey: ['checkins', deptId] })
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [deptId, qc]);
+  const now = new Date();
+  const checkinTime = ownCheckin ? new Date(ownCheckin.created_at) : null;
+  const minutesWaited = checkinTime ? Math.max(0, differenceInMinutes(now, checkinTime)) : 0;
 
-  const finishedBefore = checkins.filter(
-    (c) => c.ended_at && new Date(c.created_at) < checkinTime
-  ).length;
+  // Estimate comes from the real prediction engine (historical pattern for the
+  // hour the visit started, blended with live reports) instead of a flat 60.
+  const historicalWait = checkinTime && deptId ? getCurrentWait(patterns, deptId, checkinTime) : null;
+  const estimatedTotal = deptId ? blendWithLiveCheckins(historicalWait, checkins, now) : null;
+  const remaining = estimatedTotal !== null ? Math.max(0, estimatedTotal - minutesWaited) : null;
+  const progress =
+    estimatedTotal !== null && estimatedTotal > 0
+      ? Math.min(100, (minutesWaited / estimatedTotal) * 100)
+      : 0;
+
+  // Patients who arrived before this visit and have since been seen.
+  // This previously filtered the ACTIVE list for rows with ended_at set, which
+  // is empty by construction, so the number was always zero.
+  const finishedBefore = checkinTime
+    ? endedCheckins.filter((c) => new Date(c.created_at) < checkinTime).length
+    : 0;
 
   const recentReports = checkins
     .filter((c) => c.id !== checkinId)
@@ -69,6 +90,8 @@ const ActiveVisit = () => {
 
   const handleEndVisit = async () => {
     if (!checkinId || !deptId) { navigate('/feedback'); return; }
+    // Hand the measured wait to the feedback form so it opens on a real number.
+    if (checkinTime) rememberWaitedMinutes(minutesWaited);
     try {
       await endCheckin.mutateAsync({ id: checkinId, departmentId: deptId });
       navigate('/feedback');
@@ -79,10 +102,29 @@ const ActiveVisit = () => {
   };
 
   const handleUpdateCondition = async (condition: 'short' | 'medium' | 'long') => {
-    if (!checkinId) return;
-    await updateCondition.mutateAsync({ id: checkinId, queue_condition: condition });
-    toast.success('Queue report updated!');
+    if (!checkinId || !deptId) return;
+    try {
+      await updateCondition.mutateAsync({ id: checkinId, departmentId: deptId, queue_condition: condition });
+      toast.success('Queue report updated!');
+    } catch {
+      toast.error('Could not update your report. Please try again.');
+    }
   };
+
+  // No visit to show — don't render a timer counting up from zero.
+  if (!ownLoading && !checkinId) {
+    return (
+      <div className="container max-w-2xl py-16 text-center space-y-4">
+        <h1 className="font-display font-bold text-2xl">No visit in progress</h1>
+        <p className="text-sm text-muted-foreground">
+          Check in when you arrive at the hospital and we'll track your wait.
+        </p>
+        <Button variant="ink" size="lg" onClick={() => navigate('/checkin')}>
+          Check in now <ArrowRight className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="container max-w-2xl py-6 space-y-6 pb-24">
@@ -115,14 +157,17 @@ const ActiveVisit = () => {
           </div>
         </div>
         <p className="text-sm opacity-90 mt-4 flex items-center gap-2">
-          <TrendingUp className="h-4 w-4" /> Tracking your position in real time
+          <TrendingUp className="h-4 w-4" />
+          {remaining !== null
+            ? `About ${formatWaitTime(remaining)} left, based on this department's pattern`
+            : 'Tracking your wait'}
         </p>
       </div>
 
       <div className="card-surface p-4 flex items-center gap-3 bg-primary-soft border-primary/20">
         <Bell className="h-5 w-5 text-primary shrink-0" />
         <p className="text-sm text-foreground">
-          We'll notify you when you're within <span className="font-semibold">15 minutes</span> of being seen.
+          Keep this page open to follow live updates from other patients in your department.
         </p>
       </div>
 
@@ -150,15 +195,28 @@ const ActiveVisit = () => {
         <p className="font-semibold mb-3">Update your queue report</p>
         <div className="grid grid-cols-3 gap-2">
           {(['short', 'medium', 'long'] as const).map((l) => (
-            <Button key={l} variant="outline" size="sm" className="capitalize" onClick={() => handleUpdateCondition(l)}>
+            <Button
+              key={l}
+              variant="outline"
+              size="sm"
+              className="capitalize"
+              disabled={updateCondition.isPending}
+              onClick={() => handleUpdateCondition(l)}
+            >
               {l}
             </Button>
           ))}
         </div>
       </div>
 
-      <Button size="lg" variant="ink" className="w-full" onClick={handleEndVisit}>
-        End visit <ArrowRight className="h-4 w-4" />
+      <Button
+        size="lg"
+        variant="ink"
+        className="w-full"
+        disabled={endCheckin.isPending}
+        onClick={handleEndVisit}
+      >
+        {endCheckin.isPending ? 'Ending visit…' : 'End visit'} <ArrowRight className="h-4 w-4" />
       </Button>
     </div>
   );

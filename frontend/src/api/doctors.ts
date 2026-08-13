@@ -50,15 +50,37 @@ export function useDoctor(id: string | undefined) {
   })
 }
 
+/**
+ * Files a crowdsourced report about a doctor's status.
+ *
+ * This used to UPDATE `doctors` straight from the client. Once RLS was enabled
+ * without an UPDATE policy that matched zero rows and returned no error, so the
+ * app showed a success toast while nothing changed. Reports now go to
+ * `doctor_status_reports`; a trigger republishes `doctors.status` only when two
+ * distinct users agree within the six-hour window.
+ */
 export function useReportDoctorStatus() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: Doctor['status'] }) => {
+    mutationFn: async ({
+      id,
+      status,
+      userId,
+    }: {
+      id: string
+      status: 'on_duty' | 'on_leave'
+      userId: string
+    }) => {
       const { error } = await supabase
-        .from('doctors')
-        .update({ status, status_updated_at: new Date().toISOString() })
-        .eq('id', id)
-      if (error) throw error
+        .from('doctor_status_reports')
+        .insert({ doctor_id: id, user_id: userId, reported_status: status })
+      if (error) {
+        // Unique violation = this user already reported this doctor this hour.
+        if (error.code === '23505') {
+          throw new Error('You have already reported this doctor recently.')
+        }
+        throw error
+      }
     },
     onSuccess: (_data, { id }) => {
       qc.invalidateQueries({ queryKey: ['doctor', id] })

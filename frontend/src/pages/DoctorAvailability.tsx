@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useDoctor, useReportDoctorStatus } from "@/api/doctors";
 import { useDepartment } from "@/api/departments";
 import { useHospital } from "@/api/hospitals";
+import { useAuth } from "@/lib/auth";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import doctorPortrait from "@/assets/doctor-portrait.jpg";
@@ -14,6 +15,7 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DoctorAvailability = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [reporting, setReporting] = useState(false);
 
   const { data: doctor } = useDoctor(id);
@@ -39,14 +41,18 @@ const DoctorAvailability = () => {
   const schedule = doctor.typical_days ?? [];
   const updatedAgo = formatDistanceToNow(new Date(doctor.status_updated_at), { addSuffix: true });
 
-  const handleReport = async () => {
+  const handleReport = async (status: 'on_duty' | 'on_leave') => {
+    if (!user) return;
     setReporting(true);
-    const newStatus = doctor.status === 'on_duty' ? 'on_leave' : 'on_duty';
     try {
-      await reportStatus.mutateAsync({ id: doctor.id, status: newStatus });
-      toast.success('Status updated. Thank you for reporting!');
-    } catch {
-      toast.error('Failed to update status. Please try again.');
+      await reportStatus.mutateAsync({ id: doctor.id, status, userId: user.id });
+      // The published status only changes once a second person agrees, so don't
+      // claim it has been updated — say what actually happened.
+      toast.success('Report recorded. Status updates once another patient confirms.');
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to send report. Please try again.'
+      );
     } finally {
       setReporting(false);
     }
@@ -111,16 +117,33 @@ const DoctorAvailability = () => {
         </p>
       </div>
 
-      <Button
-        variant="outline"
-        className="w-full"
-        size="lg"
-        onClick={handleReport}
-        disabled={reporting}
-      >
-        <AlertTriangle className="h-4 w-4" />
-        {reporting ? 'Updating…' : 'Report incorrect status'}
-      </Button>
+      <div className="card-surface p-6 space-y-3">
+        <p className="font-semibold flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-primary" /> Seen something different?
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Tell us what you observed. We publish a change once a second patient reports the same
+          thing within six hours.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={reporting}
+            onClick={() => handleReport('on_duty')}
+          >
+            They're on duty
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={reporting}
+            onClick={() => handleReport('on_leave')}
+          >
+            They're not here
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, MapPin, Clock, Sparkles, Users, RefreshCw, Plus, Calendar, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,7 @@ import { useDepartment } from "@/api/departments";
 import { useQueuePatterns } from "@/api/patterns";
 import { useDoctors } from "@/api/doctors";
 import { useActiveCheckins } from "@/api/checkins";
-import { getCurrentWait, getBestTimeToVisit, getHeatmapMatrix, formatWaitTime, isWithinWorkingHours, getNextOpenInfo } from "@/lib/predictions";
-import { supabase } from "@/lib/supabase";
-import { useQueryClient } from "@tanstack/react-query";
+import { getCurrentWait, getBestTimeToday, getHeatmapMatrix, formatWaitTime, isWithinWorkingHours, getNextOpenInfo, blendWithLiveCheckins } from "@/lib/predictions";
 import { formatDistanceToNow, format } from "date-fns";
 import { DAYS, HOURS } from "@/lib/mockData";
 
@@ -22,25 +20,28 @@ const HEATMAP_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const qc = useQueryClient();
 
   const { data: prefs } = useUserPrefs(user?.id);
   const { data: hospital } = useHospital(prefs?.primary_hospital_id ?? undefined);
   const { data: dept } = useDepartment(prefs?.primary_department_id ?? undefined);
-  const { data: patterns = [] } = useQueuePatterns(dept?.id);
+  const { data: patterns = [], isError: patternsError } = useQueuePatterns(dept?.id);
   const { data: doctors = [] } = useDoctors(dept?.id);
-  const { data: checkins = [], refetch } = useActiveCheckins(dept?.id);
+  const { data: checkins = [], refetch, isError: checkinsError } = useActiveCheckins(dept?.id);
 
   const [selectedCell, setSelectedCell] = useState<{ dayIdx: number; hourIdx: number } | null>(null);
 
   const now = new Date();
-  const currentWait = dept ? getCurrentWait(patterns, dept.id, now) : null;
-  const bestTime = dept ? getBestTimeToVisit(patterns, dept.id, now) : null;
+  const historicalWait = dept ? getCurrentWait(patterns, dept.id, now) : null;
+  // Fold in what patients on-site are reporting right now, so the "Live data"
+  // badge and the active-report count actually affect the number shown.
+  const currentWait = dept ? blendWithLiveCheckins(historicalWait, checkins, now) : null;
+  const bestTime = dept ? getBestTimeToday(patterns, dept.id, now) : null;
   const withinHours = isWithinWorkingHours(now);
   const nextOpen = dept && (currentWait === null || !withinHours)
     ? getNextOpenInfo(patterns, dept.id, now)
     : null;
   const heatmapData = dept ? getHeatmapMatrix(patterns, dept.id) : undefined;
+  const hasError = patternsError || checkinsError;
 
   const selectedWait = selectedCell && dept
     ? patterns.find(
@@ -51,19 +52,10 @@ const Dashboard = () => {
       )?.avg_wait_minutes ?? null
     : null;
 
-  // Realtime subscription for live check-in feed
-  useEffect(() => {
-    if (!dept?.id) return;
-    const channel = supabase
-      .channel(`checkins-dash-${dept.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'checkins', filter: `department_id=eq.${dept.id}` },
-        () => qc.invalidateQueries({ queryKey: ['checkins', dept.id] })
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [dept?.id, qc]);
+  // The live feed refreshes on the 30s poll in useActiveCheckins. A realtime
+  // postgres_changes subscription was removed with the check-in privacy fix:
+  // now that the base table no longer grants blanket SELECT, a socket
+  // subscription would only ever deliver this user their own rows.
 
   const statusColor = (s: string) =>
     s === 'on_duty' ? 'bg-success/15 text-success'
@@ -71,7 +63,8 @@ const Dashboard = () => {
     : 'bg-muted text-muted-foreground';
 
   const displayName = user?.user_metadata?.full_name?.split(' ')[0]
-    ?? (user?.phone ? 'there' : 'there');
+    ?? user?.email?.split('@')[0]
+    ?? 'there';
 
   // Loading state — no prefs yet
   if (user && !prefs) {
@@ -117,6 +110,18 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {hasError && (
+        <div className="card-surface p-4 border-l-4 border-destructive bg-destructive/5">
+          <p className="text-sm font-medium">Couldn't load the latest data</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Showing whatever we already had. Check your connection and try again.
+          </p>
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Setup prompt if onboarding incomplete */}
       {prefs && !prefs.onboarding_completed && (
         <div className="card-surface p-4 border-l-4 border-primary bg-primary-soft">
@@ -147,7 +152,7 @@ const Dashboard = () => {
                   <p className="font-display font-bold text-5xl mt-2">~ {formatWaitTime(currentWait)}</p>
                   <p className="text-xs opacity-90 mt-3">
                     {checkins.length > 0
-                      ? `${checkins.length} active ${checkins.length === 1 ? 'report' : 'reports'} · Updated just now`
+                      ? `Blended with ${checkins.length} live ${checkins.length === 1 ? 'report' : 'reports'}`
                       : 'Based on historical patterns'}
                   </p>
                 </>
@@ -198,7 +203,9 @@ const Dashboard = () => {
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground mt-4">
-                  {dept ? 'No future predictions available' : 'Select a department to see the best time'}
+                  {dept
+                    ? 'No quieter slots left today — check the forecast below for the week.'
+                    : 'Select a department to see the best time'}
                 </p>
               )}
             </button>
@@ -213,7 +220,7 @@ const Dashboard = () => {
               </div>
               <span className="text-xs text-muted-foreground">This week</span>
             </div>
-            {heatmapData ? (
+            {heatmapData && patterns.length > 0 ? (
               <>
                 <Heatmap
                   data={heatmapData}

@@ -4,7 +4,7 @@ import { Search, ArrowRight, Clock, MapPin, Users, Sparkles, Activity, Bell } fr
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Heatmap } from "@/components/Heatmap";
-import { STATS } from "@/lib/mockData";
+import { HEATMAP, STATS } from "@/lib/mockData";
 import heroImg from "@/assets/hero-illustration.jpg";
 
 const Landing = () => {
@@ -100,7 +100,9 @@ const Landing = () => {
                 <p className="text-xs opacity-90 mt-2">Best time to visit today: <span className="font-semibold">3:30 PM</span> · ~25 min</p>
               </div>
 
-              <Heatmap compact />
+              {/* Illustrative sample for the marketing card — passed explicitly
+                  so no real view can ever render mock numbers by accident. */}
+              <Heatmap compact data={HEATMAP} />
 
               <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border">
                 <span className="flex items-center gap-2"><Users className="h-3 w-3" /> 12 reports today</span>

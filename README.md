@@ -8,7 +8,7 @@ A crowdsourced hospital queue management app for Kerala government hospitals. Pa
 
 - **Wait time predictions** — heatmap of historical queue patterns by day and hour for each department
 - **Live crowdsourcing** — patients check in anonymously to report current queue conditions, updating predictions in real time
-- **Doctor availability** — see which doctors are on duty, on leave, or unconfirmed; report incorrect statuses
+- **Doctor availability** — see which doctors are on duty, on leave, or unconfirmed; a reported status is published only once two patients agree within six hours
 - **Smart routing** — after login, new users go through onboarding; returning users land directly on their dashboard
 - **Hospital & department selection** — covers 5 Kerala government hospitals across Thiruvananthapuram, Kottayam, Kozhikode, Ernakulam, and Thrissur
 - **Best time to visit** — surfaces the lowest-wait slot coming up based on historical patterns
@@ -26,7 +26,7 @@ A crowdsourced hospital queue management app for Kerala government hospitals. Pa
 | Data fetching | TanStack Query (React Query) |
 | Backend / DB | Supabase (PostgreSQL) |
 | Auth | Supabase Auth — Google OAuth, Email magic link |
-| Realtime | Supabase Realtime (live check-in feed) |
+| Live updates | 30s polling on the anonymised check-in feed |
 | Deployment | Vercel |
 
 ---
@@ -77,10 +77,27 @@ npm run dev
 
 ### Database Setup
 
-1. Run `supabase/migrations/001_schema.sql` in your Supabase SQL Editor
-2. Run `supabase/seed.sql` to populate hospitals, departments, doctors, and initial queue patterns
-3. Run `supabase/seed_patterns_all.sql` and `supabase/seed_patterns_missing.sql` for full pattern coverage
-4. Run `supabase/seed_doctors_all.sql` to populate doctors across all departments
+Run the migrations in order in your Supabase SQL Editor (or `supabase db push`):
+
+1. `supabase/migrations/001_schema.sql` — tables
+2. `supabase/migrations/002_rls_and_constraints.sql` — row level security, integrity constraints, indexes
+3. `supabase/migrations/003_pattern_learning.sql` — the prediction feedback loop
+
+Then seed:
+
+4. `supabase/seed.sql` to populate hospitals, departments, doctors, and initial queue patterns
+5. `supabase/seed_patterns_all.sql` and `supabase/seed_patterns_missing.sql` for full pattern coverage
+6. `supabase/seed_doctors_all.sql` to populate doctors across all departments
+
+> Seed **before** 003 or re-run `UPDATE queue_patterns SET seed_wait_minutes = avg_wait_minutes`
+> afterwards — 003 snapshots the seeded values as the prior that live observations blend against.
+
+Finally, deploy the account-deletion function (it needs the service-role key, which never reaches
+the browser):
+
+```bash
+supabase functions deploy delete-account
+```
 
 ---
 
@@ -111,14 +128,44 @@ Queue wait times are predicted from a `queue_patterns` table with columns:
 - `hour` (8–19, i.e. 8 AM–7 PM)
 - `avg_wait_minutes`
 
+Buckets are keyed in **Asia/Kolkata** on both the client (`istParts`) and the server, so a user in
+another timezone cannot read — or write — the wrong slot.
+
 The engine (`src/lib/predictions.ts`) provides:
 
 - `getCurrentWait` — looks up the pattern for the current day and hour
-- `getBestTimeToVisit` — finds the lowest-wait future slot
-- `getHeatmapMatrix` — builds a 7×12 intensity matrix for the heatmap UI
-- `getNextOpenInfo` — returns the next OPD opening time when outside working hours
+- `getBestTimeToday` — the quietest slot still remaining today (returns `null` once the day is done)
+- `getBestTimeThisWeek` — the quietest slot in the next 7 days, tie-broken toward the sooner one
+- `getHeatmapMatrix` — 7×12 intensity matrix; `null` marks slots with no data, which the UI renders
+  distinctly from a genuinely quiet hour
+- `getNextOpenInfo` — the next OPD opening that actually has data
+- `blendWithLiveCheckins` — merges the historical figure with active on-site reports
 
-Predictions improve over time as users submit check-ins, which can be aggregated back into patterns.
+### How predictions actually improve
+
+The loop is closed in three steps:
+
+1. **Live blend (read time).** `blendWithLiveCheckins` weights each active check-in by recency
+   (45-minute half-life) against the historical pattern, so the number on screen responds to what
+   patients are reporting right now.
+2. **Ground truth (write time).** On post-visit feedback, an `AFTER INSERT` trigger calls
+   `recompute_pattern_bucket()` for the `(department, day, hour)` bucket the visit started in.
+3. **Weighted blend.** Observations are folded against the immutable `seed_wait_minutes` prior:
+
+   ```
+   avg_wait_minutes = (seed × 5 + Σ observed) / (5 + n)
+   ```
+
+   The prior weight of 5 means one report moves a bucket by about a sixth of the gap, so a single
+   outlier cannot swing it. `sample_count` records how much real evidence backs each bucket, and
+   observations older than 60 days age out.
+
+`refresh_queue_patterns()` recomputes everything from scratch and is safe to re-run (it always
+blends against the seed, never against an already-blended value). Schedule it with pg_cron:
+
+```sql
+SELECT cron.schedule('refresh-patterns', '0 * * * *', 'SELECT refresh_queue_patterns()');
+```
 
 ---
 
