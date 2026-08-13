@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, MapPin, Clock, Sparkles, Users, RefreshCw, Plus, Calendar, X } from "lucide-react";
+import { ChevronDown, MapPin, Clock, Sparkles, Users, RefreshCw, Plus, Calendar, X, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Heatmap } from "@/components/Heatmap";
 import { useAuth } from "@/lib/auth";
@@ -9,7 +9,7 @@ import { useHospital } from "@/api/hospitals";
 import { useDepartment } from "@/api/departments";
 import { useQueuePatterns } from "@/api/patterns";
 import { useDoctors } from "@/api/doctors";
-import { useActiveCheckins } from "@/api/checkins";
+import { useActiveCheckins, useOwnActiveCheckin } from "@/api/checkins";
 import { getCurrentWait, getBestTimeToday, getHeatmapMatrix, formatWaitTime, isWithinWorkingHours, getNextOpenInfo, blendWithLiveCheckins } from "@/lib/predictions";
 import { formatDistanceToNow, format } from "date-fns";
 import { DAYS, HOURS } from "@/lib/mockData";
@@ -27,6 +27,13 @@ const Dashboard = () => {
   const { data: patterns = [], isError: patternsError } = useQueuePatterns(dept?.id);
   const { data: doctors = [] } = useDoctors(dept?.id);
   const { data: checkins = [], refetch, isError: checkinsError } = useActiveCheckins(dept?.id);
+
+  // /visit and /feedback are otherwise unreachable from anywhere but the
+  // check-in flow itself — a user who checks in, then closes the tab and comes
+  // back later, would have no way back to end the visit and leave feedback,
+  // which is the only thing that ever writes to queue_patterns.
+  const { data: ownCheckin } = useOwnActiveCheckin(user?.id);
+  const { data: ownCheckinDept } = useDepartment(ownCheckin?.department_id);
 
   const [selectedCell, setSelectedCell] = useState<{ dayIdx: number; hourIdx: number } | null>(null);
 
@@ -109,6 +116,27 @@ const Dashboard = () => {
           </Button>
         </div>
       </div>
+
+      {ownCheckin && (
+        <div className="card-surface p-4 border-l-4 border-primary bg-primary-soft flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+              <Activity className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">
+                Visit in progress{ownCheckinDept ? ` at ${ownCheckinDept.name}` : ''}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Checked in {formatDistanceToNow(new Date(ownCheckin.created_at), { addSuffix: true })}
+              </p>
+            </div>
+          </div>
+          <Button size="sm" onClick={() => navigate('/visit')}>
+            Resume visit
+          </Button>
+        </div>
+      )}
 
       {hasError && (
         <div className="card-surface p-4 border-l-4 border-destructive bg-destructive/5">
@@ -339,8 +367,12 @@ const Dashboard = () => {
             <p className="text-xs opacity-80 mt-2">
               Your anonymous report improves predictions for thousands of patients today.
             </p>
-            <Button variant="hero" className="w-full mt-4" onClick={() => navigate('/checkin')}>
-              Check in now <Plus className="h-4 w-4" />
+            <Button
+              variant="hero"
+              className="w-full mt-4"
+              onClick={() => navigate(ownCheckin ? '/visit' : '/checkin')}
+            >
+              {ownCheckin ? 'Resume visit' : 'Check in now'} <Plus className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -348,11 +380,11 @@ const Dashboard = () => {
 
       {/* FAB */}
       <button
-        onClick={() => navigate('/checkin')}
+        onClick={() => navigate(ownCheckin ? '/visit' : '/checkin')}
         className="fixed bottom-6 right-6 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-elevated flex items-center justify-center hover:scale-105 transition-transform md:hidden"
-        aria-label="Check in"
+        aria-label={ownCheckin ? 'Resume visit' : 'Check in'}
       >
-        <Plus className="h-6 w-6" />
+        {ownCheckin ? <Activity className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
       </button>
     </div>
   );
